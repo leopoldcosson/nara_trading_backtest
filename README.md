@@ -223,3 +223,13 @@ backtest.export_excel("backtest_results.xlsx")
 ## Conclusion
 
 The Nara Backtesting Platform provides a powerful and flexible framework for backtesting algorithmic trading strategies. With its comprehensive set of tools, you can define, manage, and evaluate your strategies with ease. Whether you are a seasoned trader or a beginner, this platform offers everything you need to develop and test your trading strategies effectively.
+
+## Upcoming Features and Improvements
+
+We are continuously working to enhance the functionality and usability of the backtesting_package. In the upcoming releases, you can expect the following improvements:
+
+- Addition of Options: We will be adding support for options trading, providing more flexibility for your backtesting strategies.
+- Signal Visualization and Export: We plan to introduce features that allow you to visualize trading signals and export them to Excel for further analysis.
+- Enhanced Display Class: The Display class will be improved to offer better visualization and user experience, making it easier to interpret backtesting results.
+
+Stay tuned for these exciting updates!

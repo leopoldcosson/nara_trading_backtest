@@ -1,6 +1,5 @@
-numpy
 pandas
-plotly
-statsmodels
 tqdm
+plotly
+numpy
 yfinance

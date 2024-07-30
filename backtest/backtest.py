@@ -1,11 +1,13 @@
 # backtesting/backtest.py
 import pandas as pd
 import copy
+from tqdm import trange
 from typing import List, Type, Dict
 from .strategy import Strategy, StrategyManager
 
 class Backtest:
-    def __init__(self, base_data: pd.DataFrame, strategies: List[Type[Strategy]], weights: Dict[str, float] = {}):
+
+    def __init__(self, base_data: pd.DataFrame, strategies: List[Type[Strategy]], weights: Dict[str, float] = {}, initial_cash: float = 1000000, returns_type: str = 'additive',):
         """
         Initialize a Backtest instance.
 
@@ -13,6 +15,8 @@ class Backtest:
         base_data (pd.DataFrame): The base data to be used for the backtest.
         strategies (List[Type[Strategy]]): A list of Strategy instances.
         weights (Dict[str, float]): A dictionary of weights for each strategy. Default is equal weight.
+        initial_cash (float): The initial cash amount.
+        returns_type (str): How returns are computed [non-implemented yet]
         """
         self.base_data = copy.deepcopy(base_data)
         self.trades = pd.DataFrame(columns=['time', 'book', 'ticker', 'price', 'units'])
@@ -23,6 +27,10 @@ class Backtest:
         self.pnl = pd.DataFrame(columns=['time', 'book', 'ticker', 'pnl'])
         self.cumulative_pnl = pd.DataFrame(columns=['time', 'book', 'pnl'])
         self.weights = weights if weights else {strategy.strategy_name: 1 for strategy in strategies}
+        self.initial_cash = initial_cash
+        self.cash = initial_cash
+        self.cash_history = pd.DataFrame(columns=['time', 'cash'])
+        self.returns_type = returns_type
         self.run_backtest()
 
     def _dataframe_generator(self) -> pd.DataFrame:
@@ -32,7 +40,7 @@ class Backtest:
         Yields:
         pd.DataFrame: The incremental base data.
         """
-        for i in range(1, len(self.base_data) + 1):
+        for i in trange(1, len(self.base_data) + 1):
             yield self.base_data.iloc[:i]
 
     def next(self) -> bool:
@@ -60,7 +68,10 @@ class Backtest:
                 for ticker in latest_positions['ticker'].unique():
                     latest_prices = self.data.loc[latest_date, ticker]
                     penultimate_prices = self.data.loc[penultimate_date, ticker]
-                    diff = latest_prices - penultimate_prices
+                    if self.returns_type == 'additive':
+                        diff = latest_prices - penultimate_prices
+                    # elif self.returns_type == 'multiplicative':
+                    #     diff = (latest_prices / penultimate_prices) - 1
                     new_pnl = pd.DataFrame([[latest_date, book, ticker, diff * latest_positions.loc[(latest_positions['ticker'] == ticker) & (latest_positions['book'] == book), 'units'].values[0]]], columns=self.pnl.columns)
                     self.pnl = pd.concat([self.pnl, new_pnl], ignore_index=True)
 
@@ -103,6 +114,7 @@ class Backtest:
             self.update_pnl()
             self.update_positions_and_trades()
             self.run_strategies()
+            self.update_cash()
         self.pnl.set_index('time', inplace=True)
 
     def add_trade(self, time: pd.Timestamp, book: str, ticker: str, buy_price: float, units: float) -> None:
@@ -134,6 +146,19 @@ class Backtest:
             self.positions = pd.concat([self.positions, new_position], ignore_index=True)
         else:
             self.positions.loc[(self.positions['book'] == book) & (self.positions['ticker'] == ticker) & (self.positions['time'] == time), 'units'] = units
+
+    def update_cash(self) -> None:
+        """
+        Update the cash variable based on the latest PnL.
+        """
+        if not self.pnl.empty:
+            latest_index = self.pnl.index[-1]
+            latest_date = self.pnl.loc[latest_index, 'time']
+            latest_pnl = self.pnl.loc[latest_index, 'pnl'].sum()
+            self.cash += latest_pnl
+            new_cash_entry = pd.DataFrame([[latest_date, self.cash]], columns=['time', 'cash'])
+            self.cash_history = pd.concat([self.cash_history, new_cash_entry], ignore_index=True)
+
 
     def compute_pnl_book(self) -> pd.DataFrame:
         """
@@ -203,4 +228,5 @@ class Backtest:
                 strategy_sheet = strategy_sheet.join(pnl_book[[f'PnL_{strategy.strategy_name}']])
                 strategy_sheet = strategy_sheet.join(cumulative_pnl_book[[f'Cumulative_PnL_{strategy.strategy_name}']])
                 strategy_sheet.to_excel(writer, sheet_name=strategy.strategy_name)
+            self.cash_history.to_excel(writer, sheet_name='Cash', index=False)
         print(f'Backtest results exported to {filename}')

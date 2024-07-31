@@ -197,3 +197,23 @@ class DisplayBacktest:
         metrics_df = self.calculate_metrics(returns, resample_period=resample_period)
 
         return metrics_df
+    
+    def plot_signals(self) -> None:
+        """
+        Plot all the signals if base_signals is not None.
+        """
+        if self.backtest.base_signals is None:
+            print("No signals to display.")
+            return
+
+        fig = go.Figure()
+        for column in self.backtest.base_signals.columns:
+            fig.add_trace(go.Scatter(x=self.backtest.base_signals.index,
+                                     y=self.backtest.base_signals[column],
+                                     mode='lines',
+                                     name=column))
+        
+        fig.update_layout(title='Signals',
+                          xaxis_title='Time',
+                          yaxis_title='Signal Value')
+        fig.show()

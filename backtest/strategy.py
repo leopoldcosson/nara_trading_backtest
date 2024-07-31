@@ -4,16 +4,34 @@ import copy
 from typing import List, Type
 
 class Strategy:
-    def __init__(self, name: str, data: pd.DataFrame):
+    def __init__(self, name: str):
         """
         Initialize a Strategy instance.
 
         Parameters:
         name (str): The name of the strategy.
-        data (pd.DataFrame): The data to be used by the strategy.
         """
         self.strategy_name = name
+        self.data = pd.DataFrame()
+        self.signal = pd.DataFrame()
+
+    def update_data(self, data: pd.DataFrame) -> None:
+        """
+        Update the strategy with the latest data.
+
+        Parameters:
+        data (pd.DataFrame): The latest data.
+        """
         self.data = copy.deepcopy(data)
+
+    def update_signal(self, signal: pd.DataFrame) -> None:
+        """
+        Update the strategy with the calculated signals.
+
+        Parameters:
+        signal (pd.DataFrame): The calculated signals.
+        """
+        self.signal = copy.deepcopy(signal)
 
     def calculate_signal(self) -> None:
         """
@@ -44,6 +62,26 @@ class StrategyManager:
         strategies (List[Type[Strategy]]): A list of Strategy instances.
         """
         self.strategies = strategies
+
+    def update_all_datas(self, data: pd.DataFrame) -> None:
+        """
+        Update the data for all strategies.
+
+        Parameters:
+        data (pd.DataFrame): The latest data.
+        """
+        for strategy in self.strategies:
+            strategy.update_data(data)
+
+    def update_all_signals(self, signal: pd.DataFrame) -> None:
+        """
+        Update the signals for all strategies.
+
+        Parameters:
+        signal (pd.DataFrame): The calculated signals.
+        """
+        for strategy in self.strategies:
+            strategy.update_signal(signal)
 
     def calculate_all_signals(self) -> None:
         """

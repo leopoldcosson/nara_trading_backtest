@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='backtesting-package',
-    version='1.0',
+    version='1.2',
     author='Léopold Cosson',
     author_email='leopoldcosson@gmail.com',
     description='Framework for backtesting algorithmic trading strategies',

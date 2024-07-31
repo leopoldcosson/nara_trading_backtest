@@ -7,41 +7,75 @@ from .strategy import Strategy, StrategyManager
 
 class Backtest:
 
-    def __init__(self, base_data: pd.DataFrame, strategies: List[Type[Strategy]], weights: Dict[str, float] = {}, initial_cash: float = 1000000, returns_type: str = 'additive',):
+    def __init__(self, base_data: pd.DataFrame, strategies: List[Type[Strategy]], signals: pd.DataFrame = None, weights: Dict[str, float] = {}, initial_cash: float = 1000000, returns_type: str = 'additive'):
         """
         Initialize a Backtest instance.
 
         Parameters:
         base_data (pd.DataFrame): The base data to be used for the backtest.
         strategies (List[Type[Strategy]]): A list of Strategy instances.
+        signals (pd.DataFrame): The signals to be used for the backtest.
         weights (Dict[str, float]): A dictionary of weights for each strategy. Default is equal weight.
         initial_cash (float): The initial cash amount.
         returns_type (str): How returns are computed [non-implemented yet]
         """
+        
+        # Deep copy of the base data to avoid modifying the original data
         self.base_data = copy.deepcopy(base_data)
+        
+        # DataFrames to store trades, positions, PnL, and cash history
         self.trades = pd.DataFrame(columns=['time', 'book', 'ticker', 'price', 'units'])
         self.positions = pd.DataFrame(columns=['time', 'book', 'ticker', 'units'])
-        self._generator = self._dataframe_generator()
-        self.strategy_manager = StrategyManager(strategies)
-        self.next_positions = pd.DataFrame(columns=['time', 'ticker', 'units'])
         self.pnl = pd.DataFrame(columns=['time', 'book', 'ticker', 'pnl'])
         self.cumulative_pnl = pd.DataFrame(columns=['time', 'book', 'pnl'])
+        self.cash_history = pd.DataFrame(columns=['time', 'cash'])
+        
+        # Generator for incrementally processing the base data
+        self.data_generator = self._data_generator()
+        
+        # Handling signals if provided
+        self.base_signals = signals
+        if self.base_signals is not None:
+            self.signal_generator = self._signals_generator()
+        
+        # Initialize StrategyManager with the provided strategies
+        self.strategy_manager = StrategyManager(strategies)
+        
+        # DataFrame to store the next positions
+        self.next_positions = pd.DataFrame(columns=['time', 'ticker', 'units'])
+        
+        # Setting up strategy weights, defaulting to equal weights if not provided
         self.weights = weights if weights else {strategy.strategy_name: 1 for strategy in strategies}
+        
+        # Initialize cash-related attributes
         self.initial_cash = initial_cash
         self.cash = initial_cash
-        self.cash_history = pd.DataFrame(columns=['time', 'cash'])
+        
+        # Type of returns computation (additive or multiplicative)
         self.returns_type = returns_type
+        
+        # Run the backtest
         self.run_backtest()
 
-    def _dataframe_generator(self) -> pd.DataFrame:
+    def _data_generator(self) -> pd.DataFrame:
         """
-        Generator to yield the base data incrementally.
+        Generator to yield the base data incrementally with trange.
 
         Yields:
         pd.DataFrame: The incremental base data.
         """
         for i in trange(1, len(self.base_data) + 1):
             yield self.base_data.iloc[:i]
+
+    def _signals_generator(self) -> pd.DataFrame:
+        """
+        Generator to yield the signals incrementally without trange.
+
+        Yields:
+        pd.DataFrame: The incremental signals data.
+        """
+        for i in range(1, len(self.base_signals) + 1):
+            yield self.base_signals.iloc[:i]
 
     def next(self) -> bool:
         """
@@ -51,7 +85,9 @@ class Backtest:
         bool: True if there is more data, False otherwise.
         """
         try:
-            self.data = next(self._generator)
+            self.data = next(self.data_generator)
+            if self.base_signals is not None:
+                self.signal = next(self.signal_generator)
             return True
         except StopIteration:
             return False
@@ -60,9 +96,9 @@ class Backtest:
         """
         Update the PnL based on the latest and penultimate positions.
         """
-        if len(self.data) > 1:
-            latest_date = self.data.index[-1]
-            penultimate_date = self.data.index[-2]
+        if len(self.data) > 3:
+            latest_date = self.data.index[-2]
+            penultimate_date = self.data.index[-3]
             latest_positions = self.positions[self.positions['time'] == penultimate_date]
             for book in latest_positions['book'].unique():
                 for ticker in latest_positions['ticker'].unique():
@@ -79,9 +115,9 @@ class Backtest:
         """
         Update positions and trades based on the latest and penultimate positions.
         """
-        if len(self.data) > 2:
-            latest_date = self.data.index[-1]
-            penultimate_date = self.data.index[-2]
+        if len(self.data) > 3:
+            latest_date = self.data.index[-2]
+            penultimate_date = self.data.index[-3]
             latest_positions = self.next_positions[self.next_positions['time'] == latest_date]
             penultimate_positions = self.positions[self.positions['time'] == penultimate_date]
             for index, row in latest_positions.iterrows():
@@ -103,6 +139,9 @@ class Backtest:
         """
         Run all strategies to calculate signals and positions.
         """
+        self.strategy_manager.update_all_datas(self.data)
+        if self.base_signals is not None:
+            self.strategy_manager.update_all_signals(self.signal)
         self.strategy_manager.calculate_all_signals()
         self.next_positions = self.strategy_manager.calculate_all_positions()
 
@@ -110,11 +149,21 @@ class Backtest:
         """
         Run the backtest.
         """
+        # Iterate through the data incrementally
         while self.next():
+            # Update Profit and Loss (PnL) based on the latest data
             self.update_pnl()
+            
+            # Update positions and trades with the most recent data
             self.update_positions_and_trades()
+            
+            # Execute all strategies to calculate new signals and positions
             self.run_strategies()
+            
+            # Update the cash balance based on the latest PnL
             self.update_cash()
+        
+        # Set the 'time' column as the index for the PnL DataFrame
         self.pnl.set_index('time', inplace=True)
 
     def add_trade(self, time: pd.Timestamp, book: str, ticker: str, buy_price: float, units: float) -> None:
@@ -151,11 +200,19 @@ class Backtest:
         """
         Update the cash variable based on the latest PnL.
         """
-        if not self.pnl.empty:
-            latest_index = self.pnl.index[-1]
-            latest_date = self.pnl.loc[latest_index, 'time']
-            latest_pnl = self.pnl.loc[latest_index, 'pnl'].sum()
-            self.cash += latest_pnl
+        if len(self.pnl) > 2:
+            latest_date = self.data.index[-2]
+
+            # Compute the weighted PnL
+            if self.weights:
+                weighted_pnl = 0
+                for book, weight in self.weights.items():
+                    book_pnl = self.pnl[(self.pnl['time'] == latest_date) & (self.pnl['book'] == book)]['pnl'].sum()
+                    weighted_pnl += book_pnl * weight
+            else:
+                weighted_pnl = self.pnl[self.pnl['time'] == latest_date]['pnl'].sum()
+
+            self.cash += weighted_pnl
             new_cash_entry = pd.DataFrame([[latest_date, self.cash]], columns=['time', 'cash'])
             self.cash_history = pd.concat([self.cash_history, new_cash_entry], ignore_index=True)
 
@@ -228,5 +285,7 @@ class Backtest:
                 strategy_sheet = strategy_sheet.join(pnl_book[[f'PnL_{strategy.strategy_name}']])
                 strategy_sheet = strategy_sheet.join(cumulative_pnl_book[[f'Cumulative_PnL_{strategy.strategy_name}']])
                 strategy_sheet.to_excel(writer, sheet_name=strategy.strategy_name)
+            if self.base_signals is not None:
+                self.base_signals.to_excel(writer, sheet_name='Signals', index=True)
             self.cash_history.to_excel(writer, sheet_name='Cash', index=False)
         print(f'Backtest results exported to {filename}')
